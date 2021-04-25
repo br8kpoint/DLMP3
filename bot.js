@@ -20,12 +20,16 @@
  ***************************************************************************/
 const Discord = require('discord.js');
 const fs = require('fs');
+const path = require('path');
 const bot = new Discord.Client();
 const config = require('./config.json');
 let dispatcher;
 let audio;
 let voiceChannel;
 let fileData;
+let mode="random";
+let audioIndex = 0;
+let playlist="";
 
 bot.login(config.token);
 
@@ -34,7 +38,7 @@ function playAudio() {
   if (!voiceChannel) return console.error('The voice channel does not exist!\n(Have you looked at your configuration?)');
   
   voiceChannel.join().then(connection => {
-    let files = fs.readdirSync('./music');
+    let files = fs.readdirSync(path.join('./music',playlist));
 
     while (true) {
       audio = files[Math.floor(Math.random() * files.length)];
@@ -105,38 +109,50 @@ bot.on('ready', () => {
 bot.on('message', async msg => {
   if (msg.author.bot) return;
   if (!msg.guild) return;
-  if (!msg.content.startsWith(config.prefix)) return;
+  if (!msg.content.toUpperCase().startsWith(config.prefix.toUpperCase())) return;
   let command = msg.content.split(' ')[0];
   command = command.slice(config.prefix.length);
 
   // Public allowed commands
 
-  if (command == 'help') {
+  if (command.toUpperCase() == 'HELP') {
     if (!msg.guild.member(bot.user).hasPermission('EMBED_LINKS')) return msg.reply('**ERROR: This bot doesn\'t have the permission to send embed links please enable them to use the full help.**');
     const helpEmbed = new Discord.MessageEmbed()
     .setAuthor(`${bot.user.username} Help`, bot.user.avatarURL())
     .setDescription(`Currently playing \`${audio}\`.`)
-    .addField('Public Commands', `${config.prefix}help\n${config.prefix}ping\n${config.prefix}git\n${config.prefix}playing\n${config.prefix}about\n`, true)
-    .addField('Bot Owner Only', `${config.prefix}join\n${config.prefix}resume\n${config.prefix}pause\n${config.prefix}skip\n${config.prefix}leave\n${config.prefix}stop\n`, true)
+    .addField('Public Commands', `${config.prefix}help\n${config.prefix}ping\n${config.prefix}git\n${config.prefix}playing\n${config.prefix}singalong\n${config.prefix}about\n`, true)
+    .addField('Bot Owner Only', `${config.prefix}join\n${config.prefix}resume\n${config.prefix}pause\n${config.prefix}skip\n${config.prefix}leave\n${config.prefix}stop\n${config.prefix}random\n${config.prefix}sequential\n`, true)
     .setFooter('© Copyright 2020 Andrew Lee. Licensed with GPL-3.0.')
     .setColor('#0066ff')
 
     msg.channel.send(helpEmbed);
   }
 
-  if (command == 'ping') {
+  if (command.toUpperCase() == 'PING') {
     msg.reply('Pong!');
   }
 
-  if (command == 'git') {
+  if (command.toUpperCase() == 'GIT') {
     msg.reply('This is the source code of this project.\nhttps://github.com/Alee14/DLMP3');
   }
 
-  if (command == 'playing') {
+  if (command.toUpperCase() == 'PLAYING') {
     msg.channel.send('Currently playing `' + audio + '`.');
   }
+  if(command.toUpperCase()=='SINGALONG'){
+    //find corresponding text file and reply to message.
+    let lyricfile = './music/' + path.basename(audio,'.mp3')+".txt";
+    console.log("Checking for "+ lyricfile);
+    if(fs.existsSync(lyricfile)){
+      let lyrics = fs.readFileSync(lyricfile).toString();
+      console.log("Sending lyrics: "+lyrics);
+      msg.reply('Sing along with ' + audio + ':\n\n' + lyrics);
+    }else{
+      msg.reply('Sorry, no lyrics :(');
+    }
+  }
   
-  if (command == 'about') {
+  if (command.toUpperCase() == 'ABOUT') {
     msg.channel.send('The bot code was created by Andrew Lee (Alee#4277). Written in Discord.JS and licensed with GPL-3.0.');
   }
 
@@ -160,7 +176,7 @@ bot.on('message', async msg => {
     dispatcher.pause();
   }
 
-  if (command == 'skip') {
+  if (command.toUpperCase() == 'SKIP') {
     msg.reply('Skipping `' + audio + '`...');
     dispatcher.pause();
     dispatcher = null;
@@ -168,6 +184,18 @@ bot.on('message', async msg => {
   }
 
   if (command == 'leave') {
+  if (command.toUpperCase() == 'RANDOM') {
+    msg.reply('Setting mode to random');
+    console.log('Setting mode to random');
+    mode = "random";
+  }
+
+  if (command.toUpperCase() == 'SEQUENTIAL') {
+    msg.reply('Setting mode to sequential');
+    console.log('Setting mode to sequential');
+    mode = "sequential";
+  }
+
     voiceChannel = bot.channels.cache.get(config.voiceChannel);
     if (!voiceChannel) return console.error('The voice channel does not exist!\n(Have you looked at your configuration?)');
     msg.reply('Leaving voice channel.');
