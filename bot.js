@@ -20,6 +20,7 @@
  ***************************************************************************/
 const Discord = require('discord.js');
 const fs = require('fs');
+const globby = require('globby');
 const path = require('path');
 const bot = new Discord.Client();
 const config = require('./config.json');
@@ -29,36 +30,59 @@ let voiceChannel;
 let fileData;
 let mode="random";
 let audioIndex = 0;
+let files = [];
 let playlist="";
+let playlists = [];
 
 bot.login(config.token);
+/**
+ * Set the playlist. Can be in response to a the pefix:playlist command, in which case a message reply is sent.
+ * @param {string} cmdplaylist the name of the list to play
+ * @param {discord msg object} msg the discord message object to reply to if any
+ */
+async function setPlayList(cmdplaylist, msg=null){
+  if(playlists.includes(cmdplaylist) || cmdplaylist.toUpperCase() == 'ALL'){
+    let glob;
+    if(cmdplaylist.toUpperCase() == 'ALL')
+    {
+      // if ALL reset to nothing so it will play all files in ./music
+      glob = './music/**/*.mp3';
 
+    }   
+    else glob = `./music/${cmdplaylist}/**/*.mp3`
+    files = await globby(glob);
+    audioIndex = 0;
+    playlist = cmdplaylist;
+    if(msg) msg.reply(`**Current playlist is now ${playlist} with ${files.length} mp3s.**`);
+    //playAudio();
+  }else{
+    if(msg) msg.reply(`Playlist **${cmdplaylist}** not found!\n\nUse ${config.prefix}Lists to show available playlists.`)
+  }
+}
 function playAudio() {
   voiceChannel = bot.channels.cache.get(config.voiceChannel);
   if (!voiceChannel) return console.error('The voice channel does not exist!\n(Have you looked at your configuration?)');
   
   voiceChannel.join().then(connection => {
-    let files = fs.readdirSync(path.join('./music',playlist));
-
-    while (true) {
-      audio = files[Math.floor(Math.random() * files.length)];
-      console.log('Searching .mp3 file...');
-      if (audio.endsWith('.mp3')) {
-        break;
-      }
+    if(mode=='random'){
+      audioIndex = Math.floor(Math.random() * files.length);
+      audio = files[audioIndex];
+    }else{
+      if(audioIndex > files.length - 1) audioIndex = 0;   //reset index if past end of list
+      audio = files[audioIndex++];
     }
-
-    dispatcher = connection.play('./music/' + audio);
+    console.log(`Playing file ${audioIndex} of ${files.length}.`)
+    dispatcher = connection.play(audio);
     
     dispatcher.on('start', () => {
-      console.log('Now playing ' + audio);
-      fileData = "Now Playing: " + audio;
+      console.log('Now playing ' + path.basename(audio));
+      fileData = "Now Playing: " + path.basename(audio);
       fs.writeFile("now-playing.txt", fileData, (err) => { 
       if (err) 
       console.log(err); 
       }); 
       const statusEmbed = new Discord.MessageEmbed()
-      .addField('Now Playing', `${audio}`)
+      .addField('Now Playing', `${path.basename(audio)}`)
       .setColor('#0066ff')
 
       let statusChannel = bot.channels.cache.get(config.statusChannel);
@@ -79,7 +103,7 @@ function playAudio() {
   
 }
 
-bot.on('ready', () => {
+bot.on('ready', async () => {
   console.log('Bot is ready!');
   console.log(`Logged in as ${bot.user.tag}!`);
   console.log(`Prefix: ${config.prefix}`);
@@ -87,6 +111,19 @@ bot.on('ready', () => {
   console.log(`Voice Channel: ${config.voiceChannel}`);
   console.log(`Status Channel: ${config.statusChannel}\n`);
 
+  console.log("Scanning mp3s...");
+  // use glob to scan the whole music directory to find mp3s in all subfolders
+  const paths = await globby(['./music/**/**']);
+  console.log(`Found ${paths.length} files:`);
+  console.log(paths);
+  files = paths.filter(f=>{return path.extname(f).toUpperCase() == ".MP3"});
+  playlists  = await (await globby("./music/**",{onlyDirectories:true})).map(item=>item.replace('./music/',""))
+  console.log(`${playlists.length} playlists found:`);
+  console.log(playlists);
+  playlist = config.playlist || 'all';
+  console.log(`Setting playlist to ${playlist}`);
+  setPlayList(playlist);
+  mode = config.mode;
   bot.user.setPresence({
     activity: {
       name: `Music | ${config.prefix}help`
@@ -96,7 +133,7 @@ bot.on('ready', () => {
 
   const readyEmbed = new Discord.MessageEmbed()
   .setAuthor(`${bot.user.username}`, bot.user.avatarURL())
-  .setDescription('Starting bot...')
+  .setDescription(`Starting bot in ${config.mode} mode...`)
   .setColor('#0066ff')
 
   let statusChannel = bot.channels.cache.get(config.statusChannel);
@@ -121,7 +158,7 @@ bot.on('message', async msg => {
     .setAuthor(`${bot.user.username} Help`, bot.user.avatarURL())
     .setDescription(`Currently playing \`${audio}\`.`)
     .addField('Public Commands', `${config.prefix}help\n${config.prefix}ping\n${config.prefix}git\n${config.prefix}playing\n${config.prefix}singalong\n${config.prefix}about\n`, true)
-    .addField('Bot Owner Only', `${config.prefix}join\n${config.prefix}resume\n${config.prefix}pause\n${config.prefix}skip\n${config.prefix}leave\n${config.prefix}stop\n${config.prefix}random\n${config.prefix}sequential\n`, true)
+    .addField('Bot Owner Only', `${config.prefix}join\n${config.prefix}resume\n${config.prefix}pause\n${config.prefix}skip\n${config.prefix}leave\n${config.prefix}stop\n${config.prefix}random\n${config.prefix}sequential\n${config.prefix}lists\n${config.prefix}playlist <List>\n`, true)
     .setFooter('© Copyright 2020 Andrew Lee. Licensed with GPL-3.0.')
     .setColor('#0066ff')
 
@@ -137,41 +174,41 @@ bot.on('message', async msg => {
   }
 
   if (command.toUpperCase() == 'PLAYING') {
-    msg.channel.send('Currently playing `' + audio + '`.');
+    msg.channel.send('Currently playing `' + path.basename(audio) + '`.');
   }
   if(command.toUpperCase()=='SINGALONG'){
     //find corresponding text file and reply to message.
-    let lyricfile = './music/' + path.basename(audio,'.mp3')+".txt";
+    let lyricfile = path.join(path.dirname(audio), path.basename(audio,'.mp3')+".txt");
     console.log("Checking for "+ lyricfile);
     if(fs.existsSync(lyricfile)){
       let lyrics = fs.readFileSync(lyricfile).toString();
       console.log("Sending lyrics: "+lyrics);
-      msg.reply('Sing along with ' + audio + ':\n\n' + lyrics);
+      msg.reply('Sing along with ' + path.basename(audio, ".mp3") + ':\n\n' + lyrics);
     }else{
       msg.reply('Sorry, no lyrics :(');
     }
   }
   
   if (command.toUpperCase() == 'ABOUT') {
-    msg.channel.send('The bot code was created by Andrew Lee (Alee#4277). Written in Discord.JS and licensed with GPL-3.0.');
+    msg.channel.send('The bot code was created by Andrew Lee (Alee#4277). Modified by Mike Fair (br8kpoint#2317). Written in Discord.JS and licensed with GPL-3.0.');
   }
 
   if (![config.botOwner].includes(msg.author.id)) return;
 
   // Bot owner exclusive
 
-  if (command == 'join') {
+  if (command.toUpperCase() == 'JOIN') {
     msg.reply('Joining voice channel.');
     console.log('Connected to the voice channel.');
     playAudio();
   }
 
-  if (command == 'resume') {
+  if (command.toUpperCase() == 'RESUME') {
     msg.reply('Resuming music.');
     dispatcher.resume();
   }
 
-  if (command == 'pause') {
+  if (command.toUpperCase() == 'PAUSE') {
     msg.reply('Pausing music.');
     dispatcher.pause();
   }
@@ -183,7 +220,6 @@ bot.on('message', async msg => {
     playAudio();
   }
 
-  if (command == 'leave') {
   if (command.toUpperCase() == 'RANDOM') {
     msg.reply('Setting mode to random');
     console.log('Setting mode to random');
@@ -195,7 +231,19 @@ bot.on('message', async msg => {
     console.log('Setting mode to sequential');
     mode = "sequential";
   }
-
+  if (command.toUpperCase() == 'LISTS') {
+    playlists  = await (await globby("./music/**",{onlyDirectories:true})).map(item=>item.replace('./music/',""))
+    msg.reply(`The following playlists are available:\n\nALL *play all files in ./music*\n${playlists.join('\n')}\n\n**Current playlist: ${playlist}**`);
+    console.log(`The following playlists are available:\n\nALL *play all files in ./music*\n${playlists.join('\n')}\n\n**Current playlist: ${playlist}**`);
+  }
+  if (command.toUpperCase() == 'PLAYLIST') {
+    /** wsa:PLAYLIST <LISTNAME>
+     * <LISTNAME> is the desired playlist to switch to.
+     */
+    let cmdplaylist = msg.content.split(' ')[1]   // the playlist the user wants to play
+    setPlayList(cmdplaylist,msg);
+  }
+  if (command.toUpperCase() == 'LEAVE') {
     voiceChannel = bot.channels.cache.get(config.voiceChannel);
     if (!voiceChannel) return console.error('The voice channel does not exist!\n(Have you looked at your configuration?)');
     msg.reply('Leaving voice channel.');
@@ -210,7 +258,7 @@ bot.on('message', async msg => {
     voiceChannel.leave();
   }
 
-  if (command == 'stop') {
+  if (command.toUpperCase() == 'STOP') {
     await msg.reply('Powering off...');
     fileData = "Now Playing: Nothing";
     await fs.writeFile("now-playing.txt", fileData, (err) => { 
