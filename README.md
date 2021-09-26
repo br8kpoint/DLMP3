@@ -15,7 +15,7 @@ Make a new file called `config.json`.
     "prefix": "dl:",
     "botOwner": "your_user_id_here",
     "statusChannel": "channel_id",
-    "voiceChannel": "voice_channel_id"
+    "voiceChannel": "voice_channel_id",
     "mode":"sequential",
     "playlist":"playlist_directory_to_load_at_start_up"
 }
